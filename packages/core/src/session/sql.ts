@@ -173,3 +173,31 @@ export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   snapshot: text({ mode: "json" }).notNull().$type<SystemContext.Snapshot>(),
   baseline_seq: integer().notNull(),
 })
+
+export const RouterDecisionTable = sqliteTable(
+  "router_decisions",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    turn_number: integer().notNull(),
+    user_message_preview: text(),
+    classification_complexity: text(),
+    classification_scope: text(),
+    classification_reasoning: text(),
+    selected_provider: text(),
+    selected_model: text(),
+    scope_type: text(),
+    input_tokens: integer(),
+    output_tokens: integer(),
+    estimated_cost_usd: real(),
+    actual_cost_usd: real(),
+    router_reasoning: text(),
+    time_created: integer()
+      .notNull()
+      .$default(() => Date.now()),
+  },
+  (table) => [index("router_decisions_session_idx").on(table.session_id)],
+)

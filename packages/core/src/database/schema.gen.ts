@@ -146,6 +146,27 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`router_decisions\` (
+          \`id\` integer PRIMARY KEY AUTOINCREMENT,
+          \`session_id\` text NOT NULL,
+          \`turn_number\` integer NOT NULL,
+          \`user_message_preview\` text,
+          \`classification_complexity\` text,
+          \`classification_scope\` text,
+          \`classification_reasoning\` text,
+          \`selected_provider\` text,
+          \`selected_model\` text,
+          \`scope_type\` text,
+          \`input_tokens\` integer,
+          \`output_tokens\` integer,
+          \`estimated_cost_usd\` real,
+          \`actual_cost_usd\` real,
+          \`router_reasoning\` text,
+          \`time_created\` integer NOT NULL,
+          CONSTRAINT \`fk_router_decisions_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session_context_epoch\` (
           \`session_id\` text PRIMARY KEY,
           \`baseline\` text NOT NULL,
@@ -246,6 +267,7 @@ export default {
       )
       yield* tx.run(`CREATE INDEX \`part_message_id_id_idx\` ON \`part\` (\`message_id\`,\`id\`);`)
       yield* tx.run(`CREATE INDEX \`part_session_idx\` ON \`part\` (\`session_id\`);`)
+      yield* tx.run(`CREATE INDEX \`router_decisions_session_idx\` ON \`router_decisions\` (\`session_id\`);`)
       yield* tx.run(
         `CREATE INDEX \`session_input_session_pending_delivery_seq_idx\` ON \`session_input\` (\`session_id\`,\`promoted_seq\`,\`delivery\`,\`admitted_seq\`);`,
       )
