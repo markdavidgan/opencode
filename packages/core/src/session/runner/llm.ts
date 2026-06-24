@@ -31,9 +31,10 @@ import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionMessage } from "../message"
+import { SessionMessageID } from "../message-id"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
-import { type RunError, Service } from "./index"
+import { RouterBudgetError, type RunError, Service } from "./index"
 import { route as routeModel } from "../../router"
 import { RouterDecisions } from "../../router/decisions"
 import { RouterOverride } from "../../router/override"
@@ -238,6 +239,27 @@ export const layer = Layer.effect(
           estimatedCostUsd: routeResult.decision.estimatedCost.estimatedTotalUsd,
           routerReasoning: routeResult.decision.reasoning,
         })
+        const budget = resolvedRouterConfig.cost_tracking?.daily_budget
+        if (resolvedRouterConfig.cost_tracking?.enabled && budget !== undefined && budget > 0) {
+          const spent = yield* RouterDecisions.todaySpend(session.id).pipe(
+            Effect.provideService(Database.Service, { db }),
+            Effect.orDie,
+          )
+          const estimated = routeResult.decision.estimatedCost.estimatedTotalUsd
+          const action = resolvedRouterConfig.cost_tracking.on_budget_exceeded ?? "warn"
+          if (spent + estimated > budget) {
+            yield* events.publish(SessionEvent.RouterBudgetExceeded, {
+              sessionID: session.id,
+              timestamp: yield* DateTime.now,
+              turnNumber: currentStep,
+              dailyBudgetUsd: budget,
+              alreadySpentUsd: spent,
+              estimatedCostUsd: estimated,
+              action,
+            })
+            if (action === "block") return yield* Effect.fail(new RouterBudgetError(budget, spent, estimated))
+          }
+        }
       }
       const routedRef = routeResult
         ? ModelV2.Ref.make({
@@ -436,7 +458,22 @@ export const layer = Layer.effect(
         let needsContinuation = true
         let step = 1
         while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
+          const result = yield* runTurn(input.sessionID, promotion, step).pipe(
+            Effect.catchTag("RouterBudgetError", (error) =>
+              Effect.gen(function* () {
+                yield* events.publish(SessionEvent.Step.Failed, {
+                  sessionID: input.sessionID,
+                  timestamp: yield* DateTime.now,
+                  assistantMessageID: SessionMessageID.ID.create(),
+                  error: {
+                    type: "unknown",
+                    message: `Daily router budget exceeded: $${error.alreadySpentUsd.toFixed(4)} spent + $${error.estimatedCostUsd.toFixed(4)} estimated exceeds $${error.dailyBudgetUsd.toFixed(4)}`,
+                  },
+                })
+                return { needsContinuation: false, step }
+              }),
+            ),
+          )
           needsContinuation = result.needsContinuation
           step = result.step + 1
           promotion = "steer"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DateTime, Effect, Layer } from "effect"
+import { DateTime, Effect, Layer, Schema } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { ConfigRouter } from "@opencode-ai/core/config/router"
 import { Credential } from "@opencode-ai/core/credential"
@@ -9,9 +9,13 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { route } from "@opencode-ai/core/router/index"
 import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionSchema } from "@opencode-ai/core/session/schema"
+import { RouterDecisionTable } from "@opencode-ai/core/session/sql"
 import { RouterAvailability } from "@opencode-ai/core/router/availability"
 import { RouterCompactor } from "@opencode-ai/core/router/compactor"
 import { RouterCost } from "@opencode-ai/core/router/cost"
+import { RouterDecisions } from "@opencode-ai/core/router/decisions"
+import { Database } from "@opencode-ai/core/database/database"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
@@ -26,6 +30,7 @@ const it = testEffect(
     Layer.provideMerge(EventV2.defaultLayer),
     Layer.provideMerge(locationLayer),
     Layer.provideMerge(Credential.defaultLayer),
+    Layer.provideMerge(Database.defaultLayer),
   ),
 )
 
@@ -137,6 +142,43 @@ describe("Router", () => {
       })
       expect(result.decision.provider).toBe("anthropic")
       expect(result.decision.model).toBe("claude-sonnet-4")
+    }),
+  )
+
+  it.effect("records today's spend from router decisions", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const sessionID = SessionSchema.ID.make("ses_router_budget_test")
+      yield* db
+        .insert(RouterDecisionTable)
+        .values({
+          session_id: sessionID,
+          turn_number: 1,
+          actual_cost_usd: 0.5,
+          time_created: Date.now(),
+        })
+        .run()
+      const spend = yield* RouterDecisions.todaySpend(sessionID)
+      expect(spend).toBe(0.5)
+    }),
+  )
+
+  it.effect("falls back to bounded when the LLM classifier model is unavailable", () =>
+    Effect.gen(function* () {
+      yield* addModel("openai", "gpt-4o-mini", { input: 0.1, output: 0.4 })
+      yield* addModel("openai", "gpt-4o", { input: 5, output: 15 })
+      const result = yield* route({
+        turn: { content: "something completely ambiguous" },
+        messages: [],
+        config: new ConfigRouter.Info({
+          enabled: true,
+          mode: "auto",
+          classifier: new ConfigRouter.Classifier({ strategy: "llm", llm_model: "missing/missing" }),
+          tiers: routerConfig.tiers,
+        }),
+      })
+      expect(result.decision.model).toBe("gpt-4o")
+      expect(result.decision.scope.type).toBe("bounded")
     }),
   )
 

@@ -91,6 +91,20 @@ export const RouterDecided = EventV2.define({
 })
 export type RouterDecided = typeof RouterDecided.Type
 
+export const RouterBudgetExceeded = EventV2.define({
+  type: "session.next.router.budget-exceeded",
+  ...options,
+  schema: {
+    ...Base,
+    turnNumber: Schema.Int,
+    dailyBudgetUsd: Schema.Finite,
+    alreadySpentUsd: Schema.Finite,
+    estimatedCostUsd: Schema.Finite,
+    action: Schema.Literals(["warn", "block", "downgrade"]),
+  },
+})
+export type RouterBudgetExceeded = typeof RouterBudgetExceeded.Type
+
 export const Moved = EventV2.define({
   type: "session.next.moved",
   ...options,
@@ -452,6 +466,7 @@ const DurableDefinitions = [
   AgentSwitched,
   ModelSwitched,
   RouterDecided,
+  RouterBudgetExceeded,
   Moved,
   Prompted,
   PromptAdmitted,

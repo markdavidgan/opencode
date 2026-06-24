@@ -371,6 +371,22 @@ export const layer = Layer.effectDiscard(
         yield* run(db, event)
       }),
     )
+    yield* events.project(SessionEvent.RouterBudgetExceeded, (event) =>
+      Effect.gen(function* () {
+        yield* db
+          .insert(RouterDecisionTable)
+          .values({
+            session_id: event.data.sessionID,
+            turn_number: event.data.turnNumber,
+            estimated_cost_usd: event.data.estimatedCostUsd,
+            actual_cost_usd: 0,
+            router_reasoning: `budget ${event.data.action}: $${event.data.alreadySpentUsd.toFixed(4)} spent + $${event.data.estimatedCostUsd.toFixed(4)} estimated exceeds $${event.data.dailyBudgetUsd.toFixed(4)}`,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        yield* run(db, event)
+      }),
+    )
     yield* events.project(SessionEvent.Prompted, (event) =>
       Effect.gen(function* () {
         if (event.durable === undefined) return yield* Effect.die("Durable Session event is missing aggregate sequence")

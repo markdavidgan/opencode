@@ -8,6 +8,15 @@ import { SessionRunnerModel } from "./model"
 import type { SystemContext } from "../../system-context/index"
 import type { ToolOutputStore } from "../../tool-output-store"
 
+export class RouterBudgetError {
+  readonly _tag = "RouterBudgetError"
+  constructor(
+    readonly dailyBudgetUsd: number,
+    readonly alreadySpentUsd: number,
+    readonly estimatedCostUsd: number,
+  ) {}
+}
+
 export type RunError =
   | LLMError
   | SessionRunnerModel.Error
@@ -15,6 +24,7 @@ export type RunError =
   | ContextSnapshotDecodeError
   | SystemContext.InitializationBlocked
   | ToolOutputStore.Error
+  | RouterBudgetError
 
 /** Runs one local continuation from already-recorded Session history. */
 export interface Interface {
