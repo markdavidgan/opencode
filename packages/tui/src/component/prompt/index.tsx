@@ -46,6 +46,7 @@ import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
+import { OVERRIDE_KEY, SCOPE_KEY } from "@opencode-ai/core/router/override"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
@@ -546,6 +547,28 @@ export function Prompt(props: PromptProps) {
         slashName: "move",
         run: () => {
           move.open()
+        },
+      },
+      {
+        title: "Route model",
+        desc: "Override the model for the next turn (e.g. /route openai/gpt-4o-mini)",
+        name: "router.route",
+        category: "Router",
+        slashName: "route",
+        run: () => {
+          setStore("prompt", { input: "/route ", parts: [] })
+          input.gotoBufferEnd()
+        },
+      },
+      {
+        title: "Route scope",
+        desc: "Override the context scope for the next turn (minimal|bounded|full|architectural)",
+        name: "router.scope",
+        category: "Router",
+        slashName: "scope",
+        run: () => {
+          setStore("prompt", { input: "/scope ", parts: [] })
+          input.gotoBufferEnd()
         },
       },
     ].map((entry) => ({
@@ -1049,6 +1072,42 @@ export function Prompt(props: PromptProps) {
             },
           ]
         : []
+
+    const routerRouteMatch = inputText.match(/^\/route\s+(\S+)(?:\s+(minimal|bounded|full|architectural))?\s*$/i)
+    const routerScopeMatch = inputText.match(/^\/scope\s+(minimal|bounded|full|architectural)\s*$/i)
+    if (routerRouteMatch || routerScopeMatch) {
+      move.startSubmit()
+      const metadata: Record<string, unknown> = {}
+      if (routerRouteMatch) {
+        const [_, modelRef, scope] = routerRouteMatch
+        const [provider, ...modelParts] = modelRef.split("/")
+        const model = modelParts.join("/")
+        metadata[OVERRIDE_KEY] = {
+          provider,
+          model,
+          ...(scope ? { scopeType: scope.toLowerCase() } : {}),
+        }
+      } else if (routerScopeMatch) {
+        metadata[SCOPE_KEY] = routerScopeMatch[1].toLowerCase()
+      }
+      const res = await sdk.client.session.update({ sessionID, metadata })
+      move.finishSubmit()
+      if (res.error) {
+        toast.show({
+          title: "Failed to set routing override",
+          message: errorMessage(res.error),
+          variant: "error",
+        })
+      } else {
+        toast.show({
+          title: "Routing override set",
+          message: "The next provider turn will use the selected route.",
+          variant: "success",
+        })
+      }
+      setStore("prompt", { input: "", parts: [] })
+      return true
+    }
 
     if (store.mode === "shell") {
       move.startSubmit()

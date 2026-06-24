@@ -43,8 +43,8 @@ export interface RouteDecision {
 }
 
 export interface Override {
-  readonly provider: string
-  readonly model: string
+  readonly provider?: string
+  readonly model?: string
   readonly scopeType?: ContextScope["type"]
 }
 

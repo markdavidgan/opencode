@@ -5,6 +5,7 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/use-connected"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
+import { OVERRIDE_KEY, SCOPE_KEY } from "@opencode-ai/core/router/override"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -19,6 +20,26 @@ export function Footer() {
   })
   const directory = useDirectory()
   const connected = useConnected()
+
+  const routerOverride = createMemo(() => {
+    const data = route.data
+    if (data.type !== "session") return undefined
+    const session = sync.data.session.find((s) => s.id === data.sessionID)
+    if (!session?.metadata) return undefined
+    const override = session.metadata[OVERRIDE_KEY]
+    const scope = session.metadata[SCOPE_KEY]
+    const provider = typeof override === "object" && override !== null ? Reflect.get(override, "provider") : undefined
+    const model = typeof override === "object" && override !== null ? Reflect.get(override, "model") : undefined
+    const scopeType = typeof scope === "string" ? scope : undefined
+    if (typeof provider === "string" || typeof model === "string" || scopeType) {
+      return {
+        provider: typeof provider === "string" ? provider : undefined,
+        model: typeof model === "string" ? model : undefined,
+        scope: scopeType,
+      }
+    }
+    return undefined
+  })
 
   const [store, setStore] = createStore({
     welcome: false,
@@ -81,6 +102,15 @@ export function Footer() {
                 </Switch>
                 {mcp()} MCP
               </text>
+            </Show>
+            <Show when={routerOverride()}>
+              {(item) => {
+                const label =
+                  item().provider && item().model
+                    ? `${item().provider}/${item().model}`
+                    : `scope=${item().scope}`
+                return <text fg={theme.warning}>⚡ {label}</text>
+              }}
             </Show>
             <text fg={theme.textMuted}>/status</text>
           </Match>

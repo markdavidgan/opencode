@@ -40,14 +40,14 @@ export const route = Effect.fn("Router.route")((input: RouteInput) =>
   Effect.gen(function* () {
     const resolved = ConfigRouter.resolve(input.config)
 
-    if (input.override) {
+    if (input.override?.provider && input.override?.model) {
       const decision = yield* overrideDecision(input.override, input.messages, resolved)
       const scopedMessages = RouterCompactor.compact(input.messages, decision.scope)
       return { profile: { complexity: "unknown", scope: "unknown", reasoning: "none", codeGenExpected: false, toolUseExpected: false, longContextExpected: false }, decision, scopedMessages, wasOverridden: true }
     }
 
     const profile = RouterClassifier.classifyHeuristic(input.turn)
-    const scope = scopeFor(profile, resolved, undefined)
+    const scope = scopeFor(profile, resolved, input.override?.scopeType)
     const decision = yield* RouterSelector.select(profile, scope, resolved, input.currentModel)
     const scopedMessages = RouterCompactor.compact(input.messages, decision.scope)
 
@@ -61,11 +61,9 @@ function overrideDecision(
   config: ConfigRouter.Info,
 ) {
   return Effect.gen(function* () {
+    if (!override.provider || !override.model) return yield* Effect.die("Router override is missing provider or model")
     const catalog = yield* Catalog.Service
-    const model = yield* catalog.model.get(
-      ProviderV2.ID.make(override.provider),
-      ModelV2.ID.make(override.model),
-    )
+    const model = yield* catalog.model.get(ProviderV2.ID.make(override.provider), ModelV2.ID.make(override.model))
 
     const scopeType = override.scopeType ?? "full"
     const scope: RouterTypes.ContextScope = {
