@@ -66,10 +66,12 @@ function overrideDecision(
     const model = yield* catalog.model.get(ProviderV2.ID.make(override.provider), ModelV2.ID.make(override.model))
 
     const scopeType = override.scopeType ?? "full"
+    const compaction = config.compaction!
     const scope: RouterTypes.ContextScope = {
       type: scopeType,
       includeHistory: scopeType !== "minimal",
-      historyDepth: scopeType === "bounded" ? (config.compaction!.bounded_history_depth ?? 5) : 0,
+      historyDepth: scopeType === "bounded" ? (compaction.bounded_history_depth ?? 5) : 0,
+      headRatio: scopeType === "bounded" ? (compaction.bounded_head_ratio ?? 0.2) : 0,
       includeFileTree: scopeType === "architectural" || scopeType === "full",
       includeDecisions: true,
       includeDiff: scopeType === "architectural",
@@ -101,24 +103,27 @@ export function scopeFor(
   config: ConfigRouter.Info,
   scopeOverride?: RouterTypes.ContextScope["type"],
 ): RouterTypes.ContextScope {
+  const compaction = config.compaction!
+  const boundedHeadRatio = compaction.bounded_head_ratio ?? 0.2
+
   if (scopeOverride) {
     return {
       type: scopeOverride,
       includeHistory: scopeOverride !== "minimal",
-      historyDepth: scopeOverride === "bounded" ? (config.compaction!.bounded_history_depth ?? 5) : 0,
+      historyDepth: scopeOverride === "bounded" ? (compaction.bounded_history_depth ?? 5) : 0,
+      headRatio: scopeOverride === "bounded" ? boundedHeadRatio : 0,
       includeFileTree: scopeOverride === "architectural" || scopeOverride === "full",
       includeDecisions: true,
       includeDiff: scopeOverride === "architectural",
     }
   }
 
-  const compaction = config.compaction!
-
   if (profile.complexity === "trivial") {
     return {
       type: "minimal",
       includeHistory: false,
       historyDepth: compaction.minimal_history_depth ?? 0,
+      headRatio: 0,
       includeFileTree: false,
       includeDecisions: true,
       includeDiff: false,
@@ -130,6 +135,7 @@ export function scopeFor(
       type: "full",
       includeHistory: true,
       historyDepth: 0,
+      headRatio: 0,
       includeFileTree: true,
       includeDecisions: true,
       includeDiff: true,
@@ -140,6 +146,7 @@ export function scopeFor(
     type: "bounded",
     includeHistory: true,
     historyDepth: compaction.bounded_history_depth ?? 5,
+    headRatio: boundedHeadRatio,
     includeFileTree: false,
     includeDecisions: true,
     includeDiff: false,

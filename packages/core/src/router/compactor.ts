@@ -13,6 +13,13 @@ export function compact(
   return minimal(messages)
 }
 
+function isInFlight(message: SessionMessage.Message): boolean {
+  if (message.type !== "assistant") return false
+  return message.content.some(
+    (part) => part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
+  )
+}
+
 function minimal(messages: SessionMessage.Message[]): SessionMessage.Message[] {
   const system = messages.filter((message) => message.type === "system")
   const user = messages.filter((message) => message.type === "user")
@@ -25,6 +32,19 @@ function bounded(messages: SessionMessage.Message[], scope: RouterTypes.ContextS
   if (!scope.includeHistory || scope.historyDepth <= 0) return minimal(messages)
 
   const system = messages.filter((message) => message.type === "system")
-  const recent = messages.slice(-scope.historyDepth)
-  return [...system, ...recent]
+  const nonSystem = messages.filter((message) => message.type !== "system")
+
+  const inFlightIndex = nonSystem.findLastIndex(isInFlight)
+  const headCount = Math.floor(scope.historyDepth * scope.headRatio)
+  const tailCount = scope.historyDepth - headCount
+  const tailStart = Math.max(headCount, nonSystem.length - tailCount)
+
+  // If an in-flight tool interaction sits outside the tail window, expand the window to include it.
+  if (inFlightIndex >= 0 && inFlightIndex < tailStart) {
+    return [...system, ...nonSystem.slice(inFlightIndex)]
+  }
+
+  const head = nonSystem.slice(0, headCount)
+  const tail = nonSystem.slice(tailStart)
+  return [...system, ...head, ...tail]
 }

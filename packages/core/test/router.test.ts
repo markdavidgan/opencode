@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { DateTime, Effect, Layer } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { ConfigRouter } from "@opencode-ai/core/config/router"
 import { Credential } from "@opencode-ai/core/credential"
@@ -8,7 +8,9 @@ import { Location } from "@opencode-ai/core/location"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { route } from "@opencode-ai/core/router/index"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { RouterAvailability } from "@opencode-ai/core/router/availability"
+import { RouterCompactor } from "@opencode-ai/core/router/compactor"
 import { RouterCost } from "@opencode-ai/core/router/cost"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "./fixture/location"
@@ -32,7 +34,7 @@ function addModel(providerID: string, modelID: string, cost: { input: number; ou
     const catalog = yield* Catalog.Service
     yield* catalog.transform((editor) => {
       editor.provider.update(ProviderV2.ID.make(providerID), (provider) => {
-        provider.api = { type: "aisdk", package: "@ai-sdk/openai", id: modelID, settings: {} }
+        provider.api = { type: "aisdk", package: "@ai-sdk/openai", settings: {} }
         provider.request.body.apiKey = "test"
       })
       editor.model.update(ProviderV2.ID.make(providerID), ModelV2.ID.make(modelID), (model) => {
@@ -143,7 +145,7 @@ describe("Router", () => {
       id: ModelV2.ID.make("test"),
       providerID: ProviderV2.ID.make("test"),
       name: "test",
-      api: { id: "test", type: "native", settings: {} },
+      api: { id: ModelV2.ID.make("test"), type: "native", settings: {} },
       capabilities: { tools: true, input: [], output: [] },
       request: { headers: {}, body: {}, generation: {}, options: {} },
       variants: [],
@@ -158,5 +160,81 @@ describe("Router", () => {
       model,
     )
     expect(cost).toBeCloseTo(1590, 5)
+  })
+})
+
+describe("RouterCompactor", () => {
+  const now = DateTime.makeUnsafe(0)
+  const user = (text: string) => ({
+    type: "user" as const,
+    id: SessionMessage.ID.create(),
+    text,
+    files: [],
+    agents: [],
+    time: { created: now },
+  })
+  const system = (text: string) => ({
+    type: "system" as const,
+    id: SessionMessage.ID.create(),
+    text,
+    time: { created: now },
+  })
+
+  test("minimal keeps system messages and the last user turn only", () => {
+    const messages = [system("sys"), user("a"), user("b"), user("c")]
+    const result = RouterCompactor.compact(messages, {
+      type: "minimal",
+      includeHistory: false,
+      historyDepth: 0,
+      headRatio: 0,
+      includeFileTree: false,
+      includeDecisions: true,
+      includeDiff: false,
+    })
+    expect(result.map((m) => (m.type === "user" || m.type === "system" ? m.text : m.type))).toEqual(["sys", "c"])
+  })
+
+  test("bounded keeps the tail of non-system messages", () => {
+    const messages = [system("sys"), user("1"), user("2"), user("3"), user("4"), user("5")]
+    const result = RouterCompactor.compact(messages, {
+      type: "bounded",
+      includeHistory: true,
+      historyDepth: 3,
+      headRatio: 0,
+      includeFileTree: false,
+      includeDecisions: true,
+      includeDiff: false,
+    })
+    expect(result.map((m) => (m.type === "user" || m.type === "system" ? m.text : m.type))).toEqual(["sys", "3", "4", "5"])
+  })
+
+  test("bounded uses headRatio to keep oldest messages in the window", () => {
+    const messages = [system("sys"), user("1"), user("2"), user("3"), user("4"), user("5"), user("6")]
+    const result = RouterCompactor.compact(messages, {
+      type: "bounded",
+      includeHistory: true,
+      historyDepth: 4,
+      headRatio: 0.25,
+      includeFileTree: false,
+      includeDecisions: true,
+      includeDiff: false,
+    })
+    expect(result.map((m) => (m.type === "user" || m.type === "system" ? m.text : m.type))).toEqual(["sys", "1", "4", "5", "6"])
+  })
+
+  test("full and architectural scopes return the whole conversation", () => {
+    const messages = [system("sys"), user("1"), user("2")]
+    for (const type of ["full", "architectural"] as const) {
+      const result = RouterCompactor.compact(messages, {
+        type,
+        includeHistory: true,
+        historyDepth: 0,
+        headRatio: 0,
+        includeFileTree: true,
+        includeDecisions: true,
+        includeDiff: true,
+      })
+      expect(result).toBe(messages)
+    }
   })
 })

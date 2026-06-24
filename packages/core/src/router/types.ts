@@ -21,6 +21,7 @@ export interface ContextScope {
   readonly type: "minimal" | "bounded" | "full" | "architectural"
   readonly includeHistory: boolean
   readonly historyDepth: number
+  readonly headRatio: number
   readonly includeFileTree: boolean
   readonly includeDecisions: boolean
   readonly includeDiff: boolean
