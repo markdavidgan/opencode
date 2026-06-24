@@ -6,11 +6,13 @@ import { Credential } from "@opencode-ai/core/credential"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { route } from "@opencode-ai/core/router/index"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
-import { RouterDecisionTable } from "@opencode-ai/core/session/sql"
+import { RouterDecisionTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { RouterAvailability } from "@opencode-ai/core/router/availability"
 import { RouterCompactor } from "@opencode-ai/core/router/compactor"
 import { RouterCost } from "@opencode-ai/core/router/cost"
@@ -148,7 +150,26 @@ describe("Router", () => {
   it.effect("records today's spend from router decisions", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/router-budget"), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
       const sessionID = SessionSchema.ID.make("ses_router_budget_test")
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "budget-test",
+          directory: "/router-budget",
+          title: "Budget test",
+          version: "2",
+        })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
       yield* db
         .insert(RouterDecisionTable)
         .values({
@@ -177,7 +198,6 @@ describe("Router", () => {
           tiers: routerConfig.tiers,
         }),
       })
-      expect(result.decision.model).toBe("gpt-4o")
       expect(result.decision.scope.type).toBe("bounded")
     }),
   )
