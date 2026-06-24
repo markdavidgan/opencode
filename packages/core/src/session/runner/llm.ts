@@ -10,7 +10,9 @@ import {
 } from "@opencode-ai/llm"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
+import { Catalog } from "../../catalog"
 import { Config } from "../../config"
+import { ConfigRouter } from "../../config/router"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
 import { Location } from "../../location"
@@ -28,9 +30,13 @@ import { SessionCompaction } from "../compaction"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
+import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
+import { route as routeModel } from "../../router"
+import { RouterDecisions } from "../../router/decisions"
+import { RouterOverride } from "../../router/override"
 import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
@@ -94,14 +100,16 @@ export const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const tools = yield* ToolRegistry.Service
     const models = yield* SessionRunnerModel.Service
+    const catalog = yield* Effect.serviceOption(Catalog.Service)
     const store = yield* SessionStore.Service
     const location = yield* Location.Service
     const systemContext = yield* SystemContextRegistry.Service
     const skillGuidance = yield* SkillGuidance.Service
     const referenceGuidance = yield* ReferenceGuidance.Service
     const config = yield* Config.Service
+    const configEntries = yield* config.entries()
     const db = (yield* Database.Service).db
-    const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
+    const compaction = SessionCompaction.make({ events, llm, config: configEntries })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
@@ -187,9 +195,66 @@ export const layer = Layer.effect(
       }
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
-      const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
+      const routerConfig = Config.latest(configEntries, "router")
+      const override = yield* RouterOverride.get(session.id).pipe(
+        Effect.provideService(Database.Service, { db }),
+        Effect.orDie,
+      )
+      const resolvedRouterConfig = ConfigRouter.resolve(routerConfig)
+      const catalogValue = Option.getOrUndefined(catalog)
+      const shouldRoute = (resolvedRouterConfig.enabled || Option.isSome(override)) && catalogValue !== undefined
+      const lastUser = context.findLast((m): m is Extract<SessionMessage.Message, { type: "user" }> => m.type === "user")
+      const turnContent = lastUser?.text ?? ""
+      const routeResult = shouldRoute
+        ? yield* routeModel({
+            turn: { content: turnContent },
+            messages: context,
+            config: routerConfig,
+            currentModel: session.model,
+            override: Option.getOrUndefined(override),
+          }).pipe(Effect.provideService(Catalog.Service, catalogValue))
+        : undefined
+      if (Option.isSome(override))
+        yield* RouterOverride.clear(session.id).pipe(
+          Effect.provideService(Database.Service, { db }),
+          Effect.orDie,
+        )
+      if (routeResult) {
+        yield* events.publish(SessionEvent.RouterDecided, {
+          sessionID: session.id,
+          timestamp: yield* DateTime.now,
+          turnNumber: currentStep,
+          userMessagePreview: turnContent.slice(0, 200),
+          classificationComplexity: routeResult.profile.complexity,
+          classificationScope: routeResult.profile.scope,
+          classificationReasoning: routeResult.profile.reasoning,
+          selectedProvider: routeResult.decision.provider,
+          selectedModel: routeResult.decision.model,
+          scopeType: routeResult.decision.scope.type,
+          inputTokens: routeResult.decision.estimatedCost.inputTokens,
+          outputTokens: routeResult.decision.estimatedCost.outputTokens,
+          estimatedCostUsd: routeResult.decision.estimatedCost.estimatedTotalUsd,
+          routerReasoning: routeResult.decision.reasoning,
+        })
+      }
+      const routedRef = routeResult
+        ? ModelV2.Ref.make({
+            id: ModelV2.ID.make(routeResult.decision.model),
+            providerID: ProviderV2.ID.make(routeResult.decision.provider),
+          })
+        : undefined
+      const model = routeResult && routedRef ? yield* models.resolveFromRef(routedRef) : yield* models.resolve(session)
+      const modelInfo =
+        routedRef && catalogValue
+          ? yield* Effect.option(
+              catalogValue.model
+                .get(routedRef.providerID, routedRef.id)
+                .pipe(Effect.provideService(Catalog.Service, catalogValue)),
+            )
+          : Option.none()
+      const activeContext = routeResult?.scopedMessages ?? context
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
@@ -199,7 +264,7 @@ export const layer = Layer.effect(
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
-        messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
+        messages: [...toLLMMessages(activeContext, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
@@ -208,11 +273,22 @@ export const layer = Layer.effect(
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
         agent: agent.id,
-        model: {
-          id: ModelV2.ID.make(model.id),
-          providerID: ProviderV2.ID.make(model.provider),
-          ...(session.model?.variant === undefined ? {} : { variant: session.model.variant }),
-        },
+        model: routeResult && routedRef
+          ? routedRef
+          : {
+              id: ModelV2.ID.make(model.id),
+              providerID: ProviderV2.ID.make(model.provider),
+              ...(session.model?.variant === undefined ? {} : { variant: session.model.variant }),
+            },
+        modelInfo: Option.getOrUndefined(modelInfo),
+        onStepFinish: routeResult
+          ? (cost) =>
+              RouterDecisions.updateActualCost({
+                sessionID: session.id,
+                turnNumber: currentStep,
+                actualCostUsd: cost,
+              }).pipe(Effect.provideService(Database.Service, { db }), Effect.orDie)
+          : undefined,
       })
       const withPublication = Semaphore.makeUnsafe(1).withPermit
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>

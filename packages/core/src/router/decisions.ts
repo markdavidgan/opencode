@@ -1,6 +1,7 @@
 export * as RouterDecisions from "./decisions"
 
 import { Effect } from "effect"
+import { and, eq } from "drizzle-orm"
 import { Database } from "../database/database"
 import { RouterDecisionTable } from "../session/sql"
 import type { SessionSchema } from "../session/schema"
@@ -45,4 +46,21 @@ export const record = Effect.fn("RouterDecisions.record")((input: DecisionInput)
       })
       .run()
   }),
+)
+
+export const updateActualCost = Effect.fn("RouterDecisions.updateActualCost")(
+  (input: { sessionID: SessionSchema.ID; turnNumber: number; actualCostUsd: number }) =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* db
+        .update(RouterDecisionTable)
+        .set({ actual_cost_usd: input.actualCostUsd })
+        .where(
+          and(
+            eq(RouterDecisionTable.session_id, input.sessionID),
+            eq(RouterDecisionTable.turn_number, input.turnNumber),
+          ),
+        )
+        .run()
+    }),
 )

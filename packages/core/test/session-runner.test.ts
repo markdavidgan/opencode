@@ -35,6 +35,7 @@ import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Config } from "@opencode-ai/core/config"
+import { ConfigRouter } from "@opencode-ai/core/config/router"
 import { ConfigCompaction } from "@opencode-ai/core/config/compaction"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import {
@@ -224,6 +225,7 @@ const config = Layer.succeed(
               buffer: 3_000,
               keep: new ConfigCompaction.Keep({ tokens: 1_000 }),
             }),
+            router: new ConfigRouter.Info({ enabled: false }),
           }),
         }),
       ]),

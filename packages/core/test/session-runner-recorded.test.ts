@@ -8,6 +8,7 @@ import { EventTable } from "@opencode-ai/core/event/sql"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Config } from "@opencode-ai/core/config"
+import { ConfigRouter } from "@opencode-ai/core/config/router"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -69,7 +70,18 @@ const systemContext = SystemContextRegistry.layer
 const location = Location.layer({ directory: AbsolutePath.make("/project") }).pipe(Layer.provide(Project.defaultLayer))
 const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
-const config = Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed([]) }))
+const config = Layer.succeed(
+  Config.Service,
+  Config.Service.of({
+    entries: () =>
+      Effect.succeed([
+        new Config.Document({
+          type: "document",
+          info: new Config.Info({ router: new ConfigRouter.Info({ enabled: false }) }),
+        }),
+      ]),
+  }),
+)
 const runner = SessionRunnerLLM.defaultLayer.pipe(
   Layer.provide(Database.defaultLayer),
   Layer.provide(SessionStore.defaultLayer),

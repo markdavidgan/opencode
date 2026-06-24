@@ -13,7 +13,7 @@ import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
-import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "./sql"
+import { MessageTable, PartTable, RouterDecisionTable, SessionMessageTable, SessionTable } from "./sql"
 import type { DeepMutable } from "../schema"
 
 type DatabaseService = Database.Interface["db"]
@@ -342,6 +342,30 @@ export const layer = Layer.effectDiscard(
           .update(SessionTable)
           .set({ model: event.data.model, time_updated: DateTime.toEpochMillis(event.data.timestamp) })
           .where(eq(SessionTable.id, event.data.sessionID))
+          .run()
+          .pipe(Effect.orDie)
+        yield* run(db, event)
+      }),
+    )
+    yield* events.project(SessionEvent.RouterDecided, (event) =>
+      Effect.gen(function* () {
+        yield* db
+          .insert(RouterDecisionTable)
+          .values({
+            session_id: event.data.sessionID,
+            turn_number: event.data.turnNumber,
+            user_message_preview: event.data.userMessagePreview,
+            classification_complexity: event.data.classificationComplexity,
+            classification_scope: event.data.classificationScope,
+            classification_reasoning: event.data.classificationReasoning,
+            selected_provider: event.data.selectedProvider,
+            selected_model: event.data.selectedModel,
+            scope_type: event.data.scopeType,
+            input_tokens: event.data.inputTokens,
+            output_tokens: event.data.outputTokens,
+            estimated_cost_usd: event.data.estimatedCostUsd,
+            router_reasoning: event.data.routerReasoning,
+          })
           .run()
           .pipe(Effect.orDie)
         yield* run(db, event)

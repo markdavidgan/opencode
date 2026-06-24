@@ -2,6 +2,7 @@ import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue,
 import { DateTime, Effect } from "effect"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
+import { RouterCost } from "../../router/cost"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
@@ -10,6 +11,8 @@ type Input = {
   readonly sessionID: SessionSchema.ID
   readonly agent: string
   readonly model: ModelV2.Ref
+  readonly modelInfo?: ModelV2.Info
+  readonly onStepFinish?: (cost: number) => Effect.Effect<void>
 }
 
 const safe = (value: number | undefined) => Math.max(0, Number.isFinite(value) ? (value ?? 0) : 0)
@@ -393,14 +396,26 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       case "step-finish":
         yield* flush()
         assistantActive = false
+        const usage = event.usage
+        const inputTokens = safe(usage?.nonCachedInputTokens) + safe(usage?.cacheReadInputTokens) + safe(usage?.cacheWriteInputTokens)
+        const cost = RouterCost.actualCost(
+          {
+            inputTokens,
+            outputTokens: safe(usage?.visibleOutputTokens),
+            cacheReadInputTokens: safe(usage?.cacheReadInputTokens),
+            cacheWriteInputTokens: safe(usage?.cacheWriteInputTokens),
+          },
+          input.modelInfo,
+        )
         yield* events.publish(SessionEvent.Step.Ended, {
           sessionID: input.sessionID,
           timestamp: yield* timestamp,
           assistantMessageID: yield* startAssistant(),
           finish: event.reason,
-          cost: 0,
-          tokens: tokens(event.usage),
+          cost,
+          tokens: tokens(usage),
         })
+        if (input.onStepFinish) yield* input.onStepFinish(cost)
         return
       case "finish":
         return

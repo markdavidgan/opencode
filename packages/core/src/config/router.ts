@@ -59,6 +59,12 @@ export class Fallback extends Schema.Class<Fallback>("ConfigV2.Router.Fallback")
   on_context_window_exceeded: FallbackAction.pipe(Schema.optional),
 }) {}
 
+export class RateLimit extends Schema.Class<RateLimit>("ConfigV2.Router.RateLimit")({
+  initial_seconds: Schema.Number.pipe(Schema.optional),
+  max_seconds: Schema.Number.pipe(Schema.optional),
+  jitter: Percentage.pipe(Schema.optional),
+}) {}
+
 export class Info extends Schema.Class<Info>("ConfigV2.Router")({
   enabled: Schema.Boolean.pipe(Schema.optional),
   mode: Mode.pipe(Schema.optional),
@@ -67,6 +73,8 @@ export class Info extends Schema.Class<Info>("ConfigV2.Router")({
   tiers: Tiers.pipe(Schema.optional),
   cost_tracking: CostTracking.pipe(Schema.optional),
   fallback: Fallback.pipe(Schema.optional),
+  sticky_threshold_usd: Schema.Number.pipe(Schema.optional),
+  rate_limit: RateLimit.pipe(Schema.optional),
   blacklist: Schema.Array(Schema.String).pipe(Schema.optional),
   whitelist: Schema.Array(Schema.String).pipe(Schema.optional),
 }) {}
@@ -112,6 +120,12 @@ const defaultFallback = new Fallback({
   on_context_window_exceeded: "upgrade-model",
 })
 
+const defaultRateLimit = new RateLimit({
+  initial_seconds: 60,
+  max_seconds: 900,
+  jitter: 0.25,
+})
+
 export const defaults: Info = new Info({
   enabled: true,
   mode: "auto",
@@ -120,6 +134,8 @@ export const defaults: Info = new Info({
   tiers: defaultTiers,
   cost_tracking: defaultCostTracking,
   fallback: defaultFallback,
+  sticky_threshold_usd: 0.05,
+  rate_limit: defaultRateLimit,
 })
 
 export function resolve(input: Info | undefined): Info {
@@ -170,6 +186,14 @@ export function resolve(input: Info | undefined): Info {
             input.fallback.on_context_window_exceeded ?? defaultFallback.on_context_window_exceeded,
         })
       : defaultFallback,
+    sticky_threshold_usd: input.sticky_threshold_usd ?? defaults.sticky_threshold_usd,
+    rate_limit: input.rate_limit
+      ? new RateLimit({
+          initial_seconds: input.rate_limit.initial_seconds ?? defaultRateLimit.initial_seconds,
+          max_seconds: input.rate_limit.max_seconds ?? defaultRateLimit.max_seconds,
+          jitter: input.rate_limit.jitter ?? defaultRateLimit.jitter,
+        })
+      : defaultRateLimit,
     blacklist: input.blacklist ?? defaults.blacklist,
     whitelist: input.whitelist ?? defaults.whitelist,
   })

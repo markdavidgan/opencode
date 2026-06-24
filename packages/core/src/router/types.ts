@@ -41,3 +41,13 @@ export interface RouteDecision {
   readonly reasoning: string
   readonly estimatedCost: CostEstimate
 }
+
+export interface Override {
+  readonly provider: string
+  readonly model: string
+  readonly scopeType?: ContextScope["type"]
+}
+
+export interface ScopeOverride {
+  readonly type: ContextScope["type"]
+}

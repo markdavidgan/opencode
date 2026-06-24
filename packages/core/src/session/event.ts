@@ -70,6 +70,27 @@ export const ModelSwitched = EventV2.define({
 })
 export type ModelSwitched = typeof ModelSwitched.Type
 
+export const RouterDecided = EventV2.define({
+  type: "session.next.router.decided",
+  ...options,
+  schema: {
+    ...Base,
+    turnNumber: Schema.Int,
+    userMessagePreview: Schema.String.pipe(Schema.optional),
+    classificationComplexity: Schema.String,
+    classificationScope: Schema.String,
+    classificationReasoning: Schema.String,
+    selectedProvider: Schema.String,
+    selectedModel: Schema.String,
+    scopeType: Schema.String,
+    inputTokens: Schema.Int,
+    outputTokens: Schema.Int,
+    estimatedCostUsd: Schema.Finite,
+    routerReasoning: Schema.String,
+  },
+})
+export type RouterDecided = typeof RouterDecided.Type
+
 export const Moved = EventV2.define({
   type: "session.next.moved",
   ...options,
@@ -430,6 +451,7 @@ export namespace Compaction {
 const DurableDefinitions = [
   AgentSwitched,
   ModelSwitched,
+  RouterDecided,
   Moved,
   Prompted,
   PromptAdmitted,
