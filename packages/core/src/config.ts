@@ -20,6 +20,7 @@ import { ConfigMCP } from "./config/mcp"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
+import { ConfigRouter } from "./config/router"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 import { ConfigV1 } from "./v1/config/config"
@@ -103,6 +104,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   experimental: ConfigExperimental.Experimental.pipe(Schema.optional),
   providers: Schema.Record(Schema.String, ConfigProvider.Info).pipe(Schema.optional),
+  router: ConfigRouter.Info.pipe(Schema.optional).annotate({
+    description: "Automatic per-turn model/provider routing configuration",
+  }),
 }) {}
 
 export class Document extends Schema.Class<Document>("Config.Document")({
