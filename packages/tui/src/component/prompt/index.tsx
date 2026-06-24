@@ -571,6 +571,28 @@ export function Prompt(props: PromptProps) {
           input.gotoBufferEnd()
         },
       },
+      {
+        title: "Router status",
+        desc: "Show current router configuration status",
+        name: "router.status",
+        category: "Router",
+        slashName: "router status",
+        run: () => {
+          setStore("prompt", { input: "/router status", parts: [] })
+          input.gotoBufferEnd()
+        },
+      },
+      {
+        title: "Router stats",
+        desc: "Show today's routing spend statistics",
+        name: "router.stats",
+        category: "Router",
+        slashName: "router stats",
+        run: () => {
+          setStore("prompt", { input: "/router stats", parts: [] })
+          input.gotoBufferEnd()
+        },
+      },
     ].map((entry) => ({
       namespace: "palette",
       ...entry,
@@ -1106,6 +1128,34 @@ export function Prompt(props: PromptProps) {
         })
       }
       setStore("prompt", { input: "", parts: [] })
+      return true
+    }
+
+    const routerStatusMatch = inputText.match(/^\/router\s+status\s*$/i)
+    const routerStatsMatch = inputText.match(/^\/router\s+stats\s*$/i)
+    if (routerStatusMatch || routerStatsMatch) {
+      move.startSubmit()
+      // @ts-expect-error router config is not typed on the sync config shape yet
+      const routerConfig = sync.data.config.router
+      if (routerStatusMatch) {
+        const mode = routerConfig?.mode ?? "auto"
+        const strategy = routerConfig?.classifier?.strategy ?? "hybrid"
+        const budget = routerConfig?.cost_tracking?.daily_budget
+        const budgetText = budget !== undefined ? `$${budget.toFixed(2)}` : "unset"
+        toast.show({
+          title: "Router status",
+          message: `mode=${mode} strategy=${strategy} dailyBudget=${budgetText}`,
+          variant: "info",
+        })
+      } else {
+        toast.show({
+          title: "Router stats",
+          message: "Daily spend stats are not yet exposed in the TUI.",
+          variant: "info",
+        })
+      }
+      setStore("prompt", { input: "", parts: [] })
+      move.finishSubmit()
       return true
     }
 
