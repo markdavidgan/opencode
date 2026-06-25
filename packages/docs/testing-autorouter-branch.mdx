@@ -1,0 +1,182 @@
+---
+title: Testing the AutoRouter branch on the WSL server
+---
+
+This document describes how to test the `autorouter-phase1` branch without losing the existing production OpenCode setup on this WSL machine.
+
+## Current production setup
+
+| Component | Path / command |
+| --- | --- |
+| Installed binary | `/home/admin/.opencode/bin/opencode` |
+| Config directory | `/home/admin/.config/opencode` |
+| Data / database | `/home/admin/.local/share/opencode/opencode.db` |
+| Server service | `opencode-server.service` |
+| Cloudflare tunnel service | `opencode-tunnel.service` |
+| Public domain | `opencode.marklab.uk` |
+| Server port | `4097` |
+| Repo with the branch | `/mnt/data/repos/markdavidgan/opencode` |
+| Branch name | `autorouter-phase1` |
+
+The server is started by systemd and the tunnel depends on it, so anything that changes the binary or the server port will affect `opencode.marklab.uk`.
+
+## Before you change anything
+
+Always back up the database first. The AutoRouter work adds new tables (`router_decisions`, `session_input`, etc.), so a newer binary may migrate the DB forward.
+
+```bash
+# Back up the production database
+cp /home/admin/.local/share/opencode/opencode.db \
+   /home/admin/.local/share/opencode/opencode.db.$(date +%Y%m%d-%H%M%S).bak
+
+# Back up the current binary
+cp /home/admin/.opencode/bin/opencode /home/admin/.opencode/bin/opencode.bak
+```
+
+## Option 1: Run from source on a separate port (safest)
+
+This leaves the installed binary and the public tunnel completely untouched. You access the test instance directly on a different port.
+
+1. Make sure you are on the branch and dependencies are installed:
+   ```bash
+   cd /mnt/data/repos/markdavidgan/opencode
+   git checkout autorouter-phase1
+   git pull origin autorouter-phase1
+   bun install
+   ```
+
+2. Start the dev server on a port that does not conflict with production:
+   ```bash
+   bun dev serve --port 4098
+   ```
+
+3. Access it from the local network:
+   ```bash
+   # Find the WSL IP
+   ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1
+   ```
+   Then open `http://<wsl-ip>:4098` in a browser.
+
+4. When you are done, stop the dev server with `Ctrl-C`. Nothing else needs to be restored.
+
+### Pros and cons
+
+- **Pros**: zero risk to the production install, public tunnel, or database.
+- **Cons**: not available at `opencode.marklab.uk`; only reachable on the local network.
+
+## Option 2: Build the branch and replace the installed binary
+
+Use this when you want `opencode.marklab.uk` to actually run the AutoRouter code.
+
+### 1. Prepare
+
+```bash
+cd /mnt/data/repos/markdavidgan/opencode
+git checkout autorouter-phase1
+git pull origin autorouter-phase1
+bun install
+```
+
+### 2. Back up
+
+```bash
+# Timestamped DB backup
+BACKUP_TS=$(date +%Y%m%d-%H%M%S)
+cp /home/admin/.local/share/opencode/opencode.db \
+   /home/admin/.local/share/opencode/opencode.db.${BACKUP_TS}.bak
+
+# Binary backup
+cp /home/admin/.opencode/bin/opencode /home/admin/.opencode/bin/opencode.bak
+```
+
+### 3. Build
+
+```bash
+cd /mnt/data/repos/markdavidgan/opencode
+./packages/opencode/script/build.ts --single
+```
+
+The standalone binary is written to a path like:
+
+```
+packages/opencode/dist/opencode-linux-x64/bin/opencode
+```
+
+### 4. Replace the binary
+
+```bash
+cp /mnt/data/repos/markdavidgan/opencode/packages/opencode/dist/opencode-linux-x64/bin/opencode \
+   /home/admin/.opencode/bin/opencode
+```
+
+### 5. Restart the services
+
+```bash
+sudo systemctl restart opencode-server.service
+sudo systemctl status opencode-server.service opencode-tunnel.service
+```
+
+Wait a few seconds, then verify the site:
+
+```bash
+curl -s https://opencode.marklab.uk/health 2>&1 | head
+```
+
+(If the production build exposes a different health path, use the web root or open the site in a browser.)
+
+### Pros and cons
+
+- **Pros**: tests the real public URL, the production database, and the exact service configuration.
+- **Cons**: if the build is broken or the DB migration is incompatible, the public site will be down until you roll back.
+
+## Rollback
+
+If anything goes wrong, restore the original binary and database.
+
+```bash
+# Stop the server
+sudo systemctl stop opencode-server.service
+
+# Restore the binary
+cp /home/admin/.opencode/bin/opencode.bak /home/admin/.opencode/bin/opencode
+
+# Restore the database (replace <timestamp> with the backup you created)
+cp /home/admin/.local/share/opencode/opencode.db.<timestamp>.bak \
+   /home/admin/.local/share/opencode/opencode.db
+
+# Restart
+sudo systemctl start opencode-server.service
+sudo systemctl status opencode-tunnel.service
+```
+
+## Keeping the branch in sync with upstream
+
+The authoritative upstream repo is `https://github.com/anomalyco/opencode.git`, configured as the `upstream` remote in this checkout.
+
+```bash
+cd /mnt/data/repos/markdavidgan/opencode
+
+# Switch to dev and pull the latest upstream changes
+git checkout dev
+git fetch upstream
+git merge upstream/dev
+
+# Push the updated dev back to your fork
+git push origin dev
+
+# Check whether the feature branch needs rebasing
+git checkout autorouter-phase1
+git log --oneline --graph --left-right dev...autorouter-phase1
+```
+
+If `dev` has moved ahead of `autorouter-phase1`, rebase:
+
+```bash
+git checkout autorouter-phase1
+git rebase dev
+
+# If you already pushed the old version of the branch, force-push carefully:
+git push --force-with-lease origin autorouter-phase1
+```
+
+Only force-push when you are sure no one else is working on the branch.
